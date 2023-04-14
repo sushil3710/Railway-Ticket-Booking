@@ -1,0 +1,316 @@
+-- Table: public.train
+
+-- DROP TABLE IF EXISTS public.train;
+
+CREATE TABLE IF NOT EXISTS public.train
+(
+    train_number integer NOT NULL,
+    date_of_journey date,
+    num_of_ac integer NOT NULL,
+    num_of_sl integer NOT NULL,
+    ac_rem_seat integer NOT NULL,
+    sl_rem_seat integer NOT NULL,
+    CONSTRAINT train_pkey PRIMARY KEY (train_number,date_of_journey)
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS public.train
+    OWNER to postgres;
+
+CREATE TABLE IF NOT EXISTS public.ticket
+(
+    pnr integer NOT NULL,
+    num_passengers integer NOT NULL,
+    date_of_journey date NOT NULL,
+    train_number integer NOT NULL,
+    names_p character varying(40)[] COLLATE pg_catalog."default",
+    coach_type character varying COLLATE pg_catalog."default",
+ FOREIGN KEY (train_number,date_of_journey)  REFERENCES public.train (train_number,date_of_journey) MATCH SIMPLE
+     
+)
+
+TABLESPACE pg_default;
+ALTER TABLE IF EXISTS public.ticket
+    OWNER to postgres;
+
+
+
+CREATE TABLE IF NOT EXISTS public.passenger
+(
+    name_p character varying(20) COLLATE pg_catalog."default" NOT NULL,
+     coach_type character varying COLLATE pg_catalog."default",
+     coach_no integer NOT NULL,
+    seat_no integer NOT NULL,
+    berth_type character varying(4) ,
+    pnr integer NOT NULL
+	--Foreign key(pnr) REFERENCES ticket(pnr)
+   
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS public.passenger
+    OWNER to postgres;
+
+	
+	
+
+
+
+CREATE OR REPLACE PROCEDURE public.insert_train(
+	IN train_num integer,
+	IN doj date,
+	IN num_of_ac integer,
+	IN num_of_sl integer
+	)
+LANGUAGE 'plpgsql'
+AS $BODY$
+DECLARE
+
+slseats INTEGER;
+acseats INTEGER;
+dof DATE;
+tn INTEGER;
+
+avail_t int;
+avail_doj date;
+
+BEGIN
+
+tn = train_num;
+dof = doj;
+
+if (exists(select train_number from train where tn=train.train_number and dof=train.date_of_journey) and exists(select date_of_journey from train where tn=train.train_number and dof=train.date_of_journey) )
+then 
+return;
+end if;
+
+
+acseats = Num_of_AC*18;
+slseats = Num_of_SL*24;
+
+INSERT INTO train(train_number,date_of_journey,num_of_ac,num_of_sl,ac_rem_seat,sl_rem_seat) VALUES(tn,dof,num_of_ac,num_of_sl,acseats,slseats);
+return;
+END;
+$BODY$;
+ALTER PROCEDURE public.insert_train(integer, date, integer, integer)
+    OWNER TO postgres;
+
+
+
+
+
+
+
+
+CREATE OR REPLACE PROCEDURE public.ticket_book(
+	IN no_of_pass integer,
+	IN nams_p character varying[],
+	IN train_numb integer,
+	IN doj date,
+	IN coach character varying,
+	INOUT res integer)
+LANGUAGE 'plpgsql'
+AS $BODY$
+declare
+
+train_n int;
+train_row record;
+pnr_in int;
+chk int;
+chk_pnr int;
+
+begin
+ train_n=train_numb;
+ chk=0;
+ 
+ 
+ 
+  if (not exists(select train_number from train where train_n=train.train_number and doj=train.date_of_journey) or not exists(select date_of_journey from train where train_n=train.train_number and doj=train.date_of_journey))
+ then
+ res=0;
+ return ;
+ end if;
+ 
+ 
+ 
+ pnr_in:=(select floor(random()*(99999999-9999999+1)+9999999))::int;
+ 
+ for chk_pnr IN select pnr from ticket where train_number=ticket.train_number and doj=ticket.date_of_journey
+ loop
+ if(chk_pnr=pnr_in)then
+ pnr_in:=(select floor(random()*(99999999-9999999+1)+9999999))::int;
+ end if;
+ end loop;
+ 
+
+
+ for train_row IN select * from train where train_n=train.train_number and doj=train.date_of_journey
+ LOOP
+ if((coach = 'SL' and train_row.sl_rem_seat>=no_of_pass) or (coach= 'AC' and train_row.ac_rem_seat>=no_of_pass)) then
+ chk=1;
+ insert into Ticket(pnr,num_passengers,date_of_journey,train_number,names_p,coach_type) values(pnr_in,no_of_pass,doj,train_n,nams_p,coach);
+ end if;
+ end LOOP;
+ 
+if(chk=0)then
+res=1;
+return; 
+end if;
+
+ end;
+$BODY$;
+ALTER PROCEDURE public.ticket_book(integer, character varying[], integer, date, character varying, integer)
+    OWNER TO postgres;
+
+
+
+
+
+
+-- FUNCTION: public.passenger_update()
+
+-- DROP FUNCTION IF EXISTS public.passenger_update();
+
+
+CREATE OR REPLACE FUNCTION public.passenger_update()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+
+DECLARE
+
+ac_tot_seat int;
+sl_tot_seat int;
+curr_ac_rem_seat int;
+curr_sl_rem_seat int;
+
+berth_t varchar(2);
+doj date;
+t_n int;
+
+curr_ac_seat int;
+curr_ac_coach int;
+curr_sl_seat int;
+curr_sl_coach int;
+begin
+
+ 
+
+doj=(select date_of_journey from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+t_n=(select train_number from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+
+  curr_ac_rem_seat=(select ac_rem_seat from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+  curr_sl_rem_seat=(select sl_rem_seat from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+
+  ac_tot_seat=(select num_of_ac from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+  sl_tot_seat=(select num_of_sl from train where train.train_number=new.train_number and train.date_of_journey=new.date_of_journey);
+  
+  ac_tot_seat=ac_tot_seat*18;
+  sl_tot_seat=sl_tot_seat*24;
+  
+ 
+  curr_ac_seat=((ac_tot_seat-curr_ac_rem_seat)%18)+1;
+ curr_ac_coach=((ac_tot_seat-curr_ac_rem_seat)/18)+1;
+  curr_sl_seat=((sl_tot_seat-curr_sl_rem_seat)%24)+1;
+ curr_sl_coach=((sl_tot_seat-curr_sl_rem_seat)/24)+1; 
+ 
+ for i in 1..new.num_passengers
+ loop
+ 
+ if(new.coach_type='AC') then
+ 
+ if(curr_ac_seat%6=0)then 
+ berth_t='SU';end if;
+ if(curr_ac_seat%6=1 or curr_ac_seat%6=2 )THEN
+ berth_t='LB';end if;
+ if(curr_ac_seat%6=3 or curr_ac_seat%6=4 )THEN
+ berth_t='UB';end if;
+ if(curr_sl_seat%6=5)then
+ berth_t='SL';end if;
+
+ 
+ 
+ insert into passenger(name_p,coach_type,coach_no,seat_no,berth_type,pnr) values(new.names_p[i],new.coach_type,curr_ac_coach,curr_ac_seat,berth_t,new.pnr);
+ curr_ac_seat=curr_ac_seat+1;
+ if(curr_ac_seat=19)THEN
+ curr_ac_seat=1;
+ curr_ac_coach=curr_ac_coach+1;
+ end if;
+ 
+  update train
+  set ac_rem_seat=curr_ac_rem_seat-new.num_passengers
+  where t_n=train.train_number and doj=train.date_of_journey;
+
+ 
+ elsif(new.coach_type='SL') then
+  
+  if(curr_sl_seat%8=0)then
+  berth_t='SU';end if;
+  if(curr_sl_seat%8=1 or curr_sl_seat%8=4)then
+  berth_t='LB';end if;
+  if(curr_sl_seat%8=2 or curr_sl_seat%8=5)then
+  berth_t='MB';end if;
+  if(curr_sl_seat%8=3 or curr_sl_seat%8=6)then
+  berth_t='UB';end if;
+  if(curr_sl_seat%8=7)then
+  berth_t='SL';
+  end if;
+
+ insert into passenger(name_p,coach_type,coach_no,seat_no,berth_type,pnr) values(new.names_p[i],new.coach_type,curr_sl_coach,curr_sl_seat,berth_t,new.pnr);
+  curr_sl_seat=curr_sl_seat+1;
+ if(curr_sl_seat=25)THEN
+ curr_sl_seat=1;
+ curr_sl_coach=curr_sl_coach+1;
+ end if; 
+ 
+    update train
+  set sl_rem_seat=curr_sl_rem_seat-new.num_passengers
+ where t_n=train.train_number and doj=train.date_of_journey;
+  
+  
+  end if;
+   end loop;
+ 
+  
+
+  return NULL;
+end;
+$BODY$;
+
+ALTER FUNCTION public.passenger_update()
+    OWNER TO postgres;
+
+
+
+
+
+
+
+
+CREATE TRIGGER passenger_update
+    AFTER INSERT
+    ON public.ticket
+    FOR EACH ROW
+    EXECUTE FUNCTION public.passenger_update();
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
